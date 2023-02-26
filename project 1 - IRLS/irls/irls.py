@@ -30,6 +30,7 @@ class GradientDescent(Optimizer):
 
         new_weights = weights - (grad + reg_grad)
 
+        p = expit(X @ new_weights)
         jcost = (-1 / n) * (
                 np.dot(np.log(p + self.offset).T, y) + np.dot(np.log((np.ones(n) - p + self.offset)).T, np.ones(n) - y))
         jreg = self.reg_term / (2 * n) * np.dot(without_bias.T, without_bias)
@@ -53,6 +54,7 @@ class IRLS(Optimizer):
         z = X @ weights + inverse_w @ loss
         weights_new = np.linalg.inv(X.T @ w @ X) @ X.T @ w @ z
 
+        p = expit(X @ weights_new)
         jcost = (-1 / n) * (
                 np.dot(np.log(p + self.offset).T, y) + np.dot(np.log((np.ones(n) - p + self.offset)).T, np.ones(n) - y))
         return weights_new, jcost
@@ -83,16 +85,18 @@ class LogisticRegression:
             raise Exception("This optimizer doesn't exist")
 
     @property
-    def coefficients(self):
+    def coefficients(self) -> np.array:
         """
+        Get coefficients of logistic regression
         :returns: coefficients of properities
         :rtype: np.double
         """
         return np.copy(self._theta[1:])
 
     @property
-    def bias(self):
+    def bias(self) -> np.array:
         """
+        Get bias of logistic regression
         :return: intercept
         :rtype: np.double
         """
@@ -100,7 +104,7 @@ class LogisticRegression:
 
     def fit(self, X: np.array, y: np.array) -> "LogisticRegression":
         """
-        Train logistic regression using gradient decent
+        Train logistic regression
         :param X: learning examples
         :type X: np.array
         :param y: target
