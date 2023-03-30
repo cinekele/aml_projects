@@ -1,6 +1,7 @@
 import abc
 
 import numpy as np
+import pandas as pd
 from scipy.special import expit  # sigmoid function
 
 
@@ -61,7 +62,7 @@ class IRLS(Optimizer):
 
 
 class LogisticRegression:
-    __slots__ = ["_theta", "optimizer", "max_num_iters", "tol"]
+    __slots__ = ["_theta", "optimizer", "max_num_iters", "tol", "_interactions"]
 
     def __init__(self, optimizer: str = "IRLS", max_num_iters: int = 150, tol=1e-4, **kwargs):
         """
@@ -72,6 +73,7 @@ class LogisticRegression:
         :type max_num_iters: int
         """
         self._theta = None
+        self._interactions = None
         self.max_num_iters = max_num_iters
         self.tol = tol
         offset = kwargs["offset"] if "offset" in kwargs else 1e-6
@@ -102,14 +104,28 @@ class LogisticRegression:
         """
         return np.copy(self._theta[0])
 
-    def fit(self, X: np.array, y: np.array) -> "LogisticRegression":
+    @property
+    def interactions(self) -> np.array:
+        """
+        Get matrix of interactions included in model
+        :return: interactions
+        :rtype: np.array
+        """
+        return np.copy(self._interactions)
+
+    def fit(self, X: np.array, y: np.array, interactions: np.array = None) -> "LogisticRegression":
         """
         Train logistic regression
+        :param interactions: 2 column matrix with variable pairs to include as interactions
+        :type interactions: np.array
         :param X: learning examples
         :type X: np.array
         :param y: target
         :type y: np.array
         """
+        if interactions:
+            self._set_interactions(interactions)
+        X = self._include_interactions(X)
         n = X.shape[0]
         p = X.shape[1]
         self._theta = np.zeros(p + 1)
@@ -125,6 +141,11 @@ class LogisticRegression:
             j = j_new
         return self
 
+    def _set_interactions(self, interactions):
+        if isinstance(interactions, pd.DataFrame):
+            interactions = interactions.to_numpy()
+        self._interactions = interactions
+
     def predict(self, X: np.array, threshold: float = 0.5) -> np.array:
         """
         Predict based on given values
@@ -135,9 +156,7 @@ class LogisticRegression:
         :returns: predicted value
         :rtype: np.double
         """
-        n = X.shape[0]
-        X_with_ones = np.concatenate((np.ones((n, 1)), X), axis=1)
-        return expit(np.dot(X_with_ones, self._theta)) >= threshold
+        return self.predict_proba(X) >= threshold
 
     def predict_proba(self, X: np.array) -> np.array:
         """
@@ -147,5 +166,15 @@ class LogisticRegression:
         :rtype: np.double
         """
         n = X.shape[0]
-        X_with_ones = np.concatenate((np.ones((n, 1)), X), axis=1)
+        X_interactions = self._include_interactions(X)
+        X_with_ones = np.concatenate((np.ones((n, 1)), X_interactions), axis=1)
         return expit(np.dot(X_with_ones, self._theta))
+
+    def _include_interactions(self, X):
+        if self._interactions is None:
+            return X
+        if isinstance(X, pd.DataFrame):
+            new_cols = np.stack([X[pair[0]] * X[pair[1]] for pair in self._interactions], axis=1)
+        else:
+            new_cols = np.stack([X[:, pair[0]] * X[:, pair[1]] for pair in self._interactions], axis=1)
+        return np.hstack([X, new_cols])
