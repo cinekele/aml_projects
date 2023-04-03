@@ -123,7 +123,7 @@ class LogisticRegression:
         :param y: target
         :type y: np.array
         """
-        if interactions:
+        if interactions is not None:
             self._set_interactions(interactions)
         X = self._include_interactions(X)
         n = X.shape[0]
