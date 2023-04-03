@@ -2,7 +2,9 @@ import abc
 
 import numpy as np
 import pandas as pd
+
 from scipy.special import expit  # sigmoid function
+from typing import List
 
 
 class Optimizer(abc.ABC):
@@ -62,7 +64,7 @@ class IRLS(Optimizer):
 
 
 class LogisticRegression:
-    __slots__ = ["_theta", "optimizer", "max_num_iters", "tol", "_interactions"]
+    __slots__ = ["_theta", "optimizer", "max_num_iters", "tol", "_interactions", "_theta_hist"]
 
     def __init__(self, optimizer: str = "IRLS", max_num_iters: int = 150, tol=1e-4, **kwargs):
         """
@@ -73,6 +75,7 @@ class LogisticRegression:
         :type max_num_iters: int
         """
         self._theta = None
+        self._theta_hist = None
         self._interactions = None
         self.max_num_iters = max_num_iters
         self.tol = tol
@@ -113,6 +116,9 @@ class LogisticRegression:
         """
         return np.copy(self._interactions)
 
+    def theta_history(self) -> List[np.array]:
+        return self._theta_hist
+
     def fit(self, X: np.array, y: np.array, interactions: np.array = None) -> "LogisticRegression":
         """
         Train logistic regression
@@ -129,6 +135,7 @@ class LogisticRegression:
         n = X.shape[0]
         p = X.shape[1]
         self._theta = np.zeros(p + 1)
+        self._theta_hist = [np.copy(self._theta)]
         j = np.finfo(np.float64).max  # cost function
 
         X_with_ones = np.concatenate((np.ones((n, 1)), X), axis=1)
@@ -136,6 +143,7 @@ class LogisticRegression:
         for i in range(self.max_num_iters):
             new_weights, j_new = self.optimizer.step_opt(self._theta, X_with_ones, y)
             self._theta = new_weights
+            self._theta_hist += [np.copy(new_weights)]
             if abs(j_new - j) < self.tol:  # stop można zmienić
                 break
             j = j_new
