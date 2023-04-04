@@ -52,10 +52,10 @@ class IRLS(Optimizer):
         n = X.shape[0]
         p = expit(np.dot(X, weights))
         loss = y - p
-        w = np.diag(p * (1 - p) + self.offset)
-        inverse_w = np.linalg.inv(w)
-        z = X @ weights + inverse_w @ loss
-        weights_new = np.linalg.inv(X.T @ w @ X) @ X.T @ w @ z
+        w = p * (1 - p) + self.offset
+        inverse_w = 1 / w
+        z = X @ weights + inverse_w * loss
+        weights_new = np.linalg.inv(X.T * w @ X) @ X.T * w @ z
 
         p = expit(X @ weights_new)
         jcost = (-1 / n) * (
@@ -66,13 +66,15 @@ class IRLS(Optimizer):
 class LogisticRegression:
     __slots__ = ["_theta", "optimizer", "max_num_iters", "tol", "_interactions", "_theta_hist"]
 
-    def __init__(self, optimizer: str = "IRLS", max_num_iters: int = 150, tol=1e-4, **kwargs):
+    def __init__(self, optimizer: str = "IRLS", max_num_iters: int = 1000, tol=1e-4, **kwargs):
         """
         Initialization of class
         :param optimizer: optimizer of logistic regression
         :type optimizer: str
         :param max_num_iters: max number of iteration of gradient descent
         :type max_num_iters: int
+        :param tol: parameter, which indicate when theta converges
+        :type tol: float
         """
         self._theta = None
         self._theta_hist = None
@@ -94,7 +96,7 @@ class LogisticRegression:
         """
         Get coefficients of logistic regression
         :returns: coefficients of properities
-        :rtype: np.double
+        :rtype: np.array
         """
         return np.copy(self._theta[1:])
 
@@ -103,9 +105,18 @@ class LogisticRegression:
         """
         Get bias of logistic regression
         :return: intercept
-        :rtype: np.double
+        :rtype: np.array
         """
         return np.copy(self._theta[0])
+
+    @property
+    def theta(self) -> np.array:
+        """
+        Get whole theta
+        :return: theta
+        :rtype: np.array
+        """
+        return np.copy(self._theta)
 
     @property
     def interactions(self) -> np.array:
@@ -117,6 +128,11 @@ class LogisticRegression:
         return np.copy(self._interactions)
 
     def theta_history(self) -> List[np.array]:
+        """
+        Return history of changes theta parameter
+        :return: theta_history
+        :rtype: list[np.array]
+        """
         return self._theta_hist
 
     def fit(self, X: np.array, y: np.array, interactions: np.array = None) -> "LogisticRegression":
