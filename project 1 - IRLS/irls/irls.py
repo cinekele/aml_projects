@@ -66,7 +66,7 @@ class IRLS(Optimizer):
 class LogisticRegression:
     __slots__ = ["_theta", "optimizer", "max_num_iters", "tol", "_interactions", "_theta_hist"]
 
-    def __init__(self, optimizer: str = "IRLS", max_num_iters: int = 1000, tol=1e-4, **kwargs):
+    def __init__(self, optimizer: str = "IRLS", max_num_iters: int = 1000, tol=1e-6, **kwargs):
         """
         Initialization of class
         :param optimizer: optimizer of logistic regression
@@ -81,7 +81,7 @@ class LogisticRegression:
         self._interactions = None
         self.max_num_iters = max_num_iters
         self.tol = tol
-        offset = kwargs["offset"] if "offset" in kwargs else 1e-6
+        offset = kwargs["offset"] if "offset" in kwargs else 1e-4
         if optimizer == "GB":
             alpha = kwargs["alpha"] if "alpha" in kwargs else 1e-4
             reg_term = kwargs["reg_term"] if "reg_term" in kwargs else 0.0001
