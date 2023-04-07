@@ -163,7 +163,7 @@ class LogisticRegression(BaseEstimator):
             new_weights, j_new = self.optimizer.step_opt(self._theta, X_with_ones, y)
             self._theta = new_weights
             self._theta_hist += [np.copy(new_weights)]
-            if abs(j_new - j) < self.tol:  # stop można zmienić
+            if abs(j_new - j) < self.tol:  # TODO: Zmienić na skleanra, czyli jeśli gradient w którymś kierunku jest mniejszy od tola
                 break
             j = j_new
         return self
