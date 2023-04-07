@@ -1,7 +1,7 @@
 from unittest import TestCase
 import numpy as np
 import pandas as pd
-from irls import LogisticRegression
+from irls import LogisticRegression, IRLS, Optimizer
 
 
 class TestLogisticRegression(TestCase):
@@ -35,3 +35,12 @@ class TestLogisticRegression(TestCase):
         self.assertEqual(X_new.shape, (10, 6))
         X_expected = np.hstack([X1, X2, np.zeros((10, 1)), np.ones((10, 1))])
         self.assertTrue((X_new == X_expected).all())
+
+    def test__bad_initalization_optimzer(self):
+        with self.assertRaises(Exception) as ex:
+            LogisticRegression(optimizer="NotOptimizer")
+            self.assertEqual("This optimizer doesn't exist", str(ex.exception))
+
+    def test__proper_initalization_optimzer(self):
+        lr = LogisticRegression(optimizer=IRLS(1e-6))
+        self.assertTrue(issubclass(lr.optimizer.__class__, Optimizer))

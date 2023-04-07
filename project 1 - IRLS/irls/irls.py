@@ -5,6 +5,7 @@ import pandas as pd
 
 from scipy.special import expit  # sigmoid function
 from typing import List
+from sklearn.base import BaseEstimator
 
 
 class Optimizer(abc.ABC):
@@ -63,7 +64,7 @@ class IRLS(Optimizer):
         return weights_new, jcost
 
 
-class LogisticRegression:
+class LogisticRegression(BaseEstimator):
     __slots__ = ["_theta", "optimizer", "max_num_iters", "tol", "_interactions", "_theta_hist"]
 
     def __init__(self, optimizer: str = "IRLS", max_num_iters: int = 1000, tol=1e-6, **kwargs):
@@ -88,6 +89,8 @@ class LogisticRegression:
             self.optimizer = GradientDescent(alpha, reg_term, offset)
         elif optimizer == "IRLS":
             self.optimizer = IRLS(offset)
+        elif issubclass(optimizer.__class__, Optimizer):
+            self.optimizer = optimizer
         else:
             raise Exception("This optimizer doesn't exist")
 
