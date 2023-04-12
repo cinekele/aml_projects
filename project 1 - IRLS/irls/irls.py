@@ -1,11 +1,10 @@
 import abc
+from typing import List
 
 import numpy as np
 import pandas as pd
-
 from scipy.special import expit  # sigmoid function
-from typing import List
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator  # provides clone utility from sklearn.base package
 
 
 class Optimizer(abc.ABC):
@@ -33,14 +32,7 @@ class GradientDescent(Optimizer):
         reg_grad = self.reg_term * without_bias / n  # regularization term
 
         new_weights = weights - (grad + reg_grad)
-
-        p = expit(X @ new_weights)
-        jcost = (-1 / n) * (
-                np.dot(np.log(p + self.offset).T, y) + np.dot(np.log((np.ones(n) - p + self.offset)).T, np.ones(n) - y))
-        jreg = self.reg_term / (2 * n) * np.dot(without_bias.T, without_bias)
-        j_new = jcost + jreg
-
-        return new_weights, j_new
+        return new_weights
 
 
 class IRLS(Optimizer):
@@ -50,24 +42,19 @@ class IRLS(Optimizer):
         self.offset = offset
 
     def step_opt(self, weights, X, y):
-        n = X.shape[0]
         p = expit(np.dot(X, weights))
         loss = y - p
         w = p * (1 - p) + self.offset
         inverse_w = 1 / w
         z = X @ weights + inverse_w * loss
         weights_new = np.linalg.inv(X.T * w @ X) @ X.T * w @ z
-
-        p = expit(X @ weights_new)
-        jcost = (-1 / n) * (
-                np.dot(np.log(p + self.offset).T, y) + np.dot(np.log((np.ones(n) - p + self.offset)).T, np.ones(n) - y))
-        return weights_new, jcost
+        return weights_new
 
 
 class LogisticRegression(BaseEstimator):
     __slots__ = ["_theta", "optimizer", "max_num_iters", "tol", "_interactions", "_theta_hist"]
 
-    def __init__(self, optimizer: str = "IRLS", max_num_iters: int = 1000, tol=1e-6, **kwargs):
+    def __init__(self, optimizer: str = "IRLS", max_num_iters: int = 100, tol=1e-4, **kwargs):
         """
         Initialization of class
         :param optimizer: optimizer of logistic regression
@@ -155,17 +142,16 @@ class LogisticRegression(BaseEstimator):
         p = X.shape[1]
         self._theta = np.zeros(p + 1)
         self._theta_hist = [np.copy(self._theta)]
-        j = np.finfo(np.float64).max  # cost function
 
         X_with_ones = np.concatenate((np.ones((n, 1)), X), axis=1)
 
         for i in range(self.max_num_iters):
-            new_weights, j_new = self.optimizer.step_opt(self._theta, X_with_ones, y)
+            new_weights = self.optimizer.step_opt(self._theta, X_with_ones, y)
+            old_weights = self._theta
             self._theta = new_weights
             self._theta_hist += [np.copy(new_weights)]
-            if abs(j_new - j) < self.tol:  # TODO: Zmienić na skleanra, czyli jeśli gradient w którymś kierunku jest mniejszy od tola
+            if np.linalg.norm(new_weights - old_weights, np.inf) < self.tol:
                 break
-            j = j_new
         return self
 
     def _set_interactions(self, interactions):
