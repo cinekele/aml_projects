@@ -1,1 +1,1 @@
-from .optuna_optimization import Objective
+from .optuna_optimization import Objective, get_feature_numbers
