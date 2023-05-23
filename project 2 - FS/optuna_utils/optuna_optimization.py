@@ -15,7 +15,7 @@ def get_feature_numbers(estimator, X, y):
 
 class Objective(object):
     def __init__(self, x, y, feature_selectors, mode: str, scaling_factor: float = None,
-                 cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=123), n_jobs=5):
+                 cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=123), n_jobs=5, use_scaler=True):
         self.n_jobs = n_jobs
         self.cv = cv
         self.x = x
@@ -24,6 +24,7 @@ class Objective(object):
             raise Exception("mode isn't single or multiple")
         self.mode = mode
         self.scaling_factor = scaling_factor
+        self.use_scaler = use_scaler
         self.feature_selectors = feature_selectors
         self.feature_selector_names = [feature_selector.__name__ for feature_selector in feature_selectors]
         self.feature_selector_names_for_svm = [feature_selector.__name__ for feature_selector in feature_selectors if
@@ -62,7 +63,7 @@ class Objective(object):
             percentile = trial.suggest_int('percentile', 5, 70)
             fs_model_obj = fs_model(percentile=percentile)
         elif fs_name == "SelectKBest":
-            k = trial.suggest_int('k', 5, len(self.x.columns), log=True)
+            k = trial.suggest_int('k', 5, self.x.shape[1], log=True) # .shape[1] works with sparse matrices
             fs_model_obj = fs_model(k=k)
         elif fs_name == "SelectFromModel":
             fs_model_obj = fs_model(estimator=classifier_obj)
@@ -81,11 +82,17 @@ class Objective(object):
         else:
             fs_model_obj = fs_model()
 
-        pipeline = Pipeline([
-            ('st', StandardScaler()),
-            ('fs', fs_model_obj),
-            ('model', classifier_obj)
-        ])
+        if self.use_scaler:
+            pipeline = Pipeline([
+                ('st', StandardScaler()), # does not work for sparse matrices
+                ('fs', fs_model_obj),
+                ('model', classifier_obj)
+            ])
+        else:
+            pipeline = Pipeline([
+                ('fs', fs_model_obj),
+                ('model', classifier_obj)
+            ])
 
         res = cross_validate(pipeline, self.x, self.y,
                              scoring={
