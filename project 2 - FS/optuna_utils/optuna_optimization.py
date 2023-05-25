@@ -1,3 +1,5 @@
+from typing import Callable
+
 import numpy as np
 from lightgbm import LGBMClassifier
 from sklearn.metrics import balanced_accuracy_score, make_scorer
@@ -31,7 +33,7 @@ def spam_scorer(estimator, X, y):
 
 
 class Objective(object):
-    def __init__(self, x, y, feature_selectors, mode: str, scaling_factor: float = None,
+    def __init__(self, x, y, feature_selectors, mode: str, single_scorer: Callable = None,
                  cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=123), n_jobs=5, use_scaler=True):
         self.n_jobs = n_jobs
         self.cv = cv
@@ -40,7 +42,7 @@ class Objective(object):
         if mode not in ["single", "multiple"]:
             raise Exception("mode isn't single or multiple")
         self.mode = mode
-        self.scaling_factor = scaling_factor
+        self.single_scorer = single_scorer
         self.use_scaler = use_scaler
         self.feature_selectors = feature_selectors
         self.feature_selector_names = [feature_selector.__name__ for feature_selector in feature_selectors]
@@ -116,15 +118,16 @@ class Objective(object):
                 ('model', classifier_obj)
             ])
 
-        res = cross_validate(pipeline, self.x, self.y,
-                             scoring={
-                                 'balanced_accuracy': make_scorer(balanced_accuracy_score),
-                                 'feature_numbers': get_feature_numbers
-                             }, cv=self.cv, n_jobs=self.n_jobs)
-
         if self.mode == "multiple":
+            res = cross_validate(pipeline, self.x, self.y,
+                                 scoring={
+                                     'balanced_accuracy': make_scorer(balanced_accuracy_score),
+                                     'feature_numbers': get_feature_numbers
+                                 }, cv=self.cv, n_jobs=self.n_jobs)
             return np.mean(res['test_balanced_accuracy']), np.mean(res['test_feature_numbers'])
         else:
-            return np.mean(
-                res['test_balanced_accuracy'] - 0.01 * np.maximum(
-                    self.scaling_factor * res['test_feature_numbers'] - 1, 0))
+            res = cross_validate(pipeline, self.x, self.y,
+                                 scoring={
+                                     "score": self.single_scorer
+                                 }, cv=self.cv, n_jobs=self.n_jobs)
+            return np.mean(res['test_score'])
