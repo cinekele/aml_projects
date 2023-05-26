@@ -2,12 +2,14 @@ from typing import Callable
 
 import numpy as np
 from lightgbm import LGBMClassifier
+from sklearn.feature_selection import SelectFromModel
 from sklearn.metrics import balanced_accuracy_score, make_scorer
 from sklearn.model_selection import StratifiedKFold, cross_validate
+from sklearn.naive_bayes import BernoulliNB, MultinomialNB, ComplementNB
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.svm import SVC
+from sklearn.svm import LinearSVC, SVC
 from xgboost import XGBClassifier
 
 
@@ -48,7 +50,7 @@ class Objective(object):
         self.feature_selector_names = [feature_selector.__name__ for feature_selector in feature_selectors]
 
     def __call__(self, trial):
-        classifier_name = trial.suggest_categorical('classifier', ['XGB', 'SVC', 'LGBM', 'RF'])
+        classifier_name = trial.suggest_categorical('classifier', ['XGB', 'SVC', 'LGBM', 'RF', 'L1_SVC'])
         if classifier_name == 'XGB':
             booster = trial.suggest_categorical('xgb_booster', ['gbtree', 'dart'])
             max_depth = trial.suggest_int('xgb_max_depth', 1, 15)
@@ -72,6 +74,9 @@ class Objective(object):
                 criterion=criterion,
                 min_samples_split=min_samples_split
             )
+        elif classifier_name == "L1_SVC":
+            c = trial.suggest_float("l1_svc_C", 1e-2, 1e2, log=True)
+            classifier_obj = LinearSVC(penalty="l1", C=c, dual=False, class_weight="balanced")
         else:
             boosting_type = trial.suggest_categorical('lgbm_boosting_type', ['gbdt', 'dart'])
             max_depth = trial.suggest_int('lgbm_max_depth', 1, 15)
@@ -117,6 +122,50 @@ class Objective(object):
                 ('fs', fs_model_obj),
                 ('model', classifier_obj)
             ])
+
+        if self.mode == "multiple":
+            res = cross_validate(pipeline, self.x, self.y,
+                                 scoring={
+                                     'balanced_accuracy': make_scorer(balanced_accuracy_score),
+                                     'feature_numbers': get_feature_numbers
+                                 }, cv=self.cv, n_jobs=self.n_jobs)
+            return np.mean(res['test_balanced_accuracy']), np.mean(res['test_feature_numbers'])
+        else:
+            res = cross_validate(pipeline, self.x, self.y,
+                                 scoring={
+                                     "score": self.single_scorer
+                                 }, cv=self.cv, n_jobs=self.n_jobs)
+            return np.mean(res['test_score'])
+
+
+class SpamObjective(object):
+
+    # New class for spam dataset. It's needed because of BernoulliNB which works on binary data.
+    def __init__(self, x, y, mode: str, single_scorer: Callable = spam_scorer,
+                 cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=123), n_jobs=5):
+        self.n_jobs = n_jobs
+        self.cv = cv
+        self.x = x
+        self.y = y
+        if mode not in ["single", "multiple"]:
+            raise Exception("mode isn't single or multiple")
+        self.mode = mode
+        self.single_scorer = single_scorer
+
+    def __call__(self, trial):
+        classifier_name = trial.suggest_categorical('classifier', ['Bern', 'Multi', 'Complement'])
+        alpha = trial.suggest_float('nb_alpha', 1e-10, 10, log=True)
+        if classifier_name == "Bern":
+            classifier_obj = BernoulliNB(alpha=alpha)
+        elif classifier_name == 'Multi':
+            classifier_obj = MultinomialNB(alpha=alpha)
+        else:
+            classifier_obj = ComplementNB(alpha=alpha)
+        c = trial.suggest_float('svc_C', 1e-2, 10)
+        pipeline = Pipeline([
+            ('fs', SelectFromModel(LinearSVC(C=c))),
+            ('model', classifier_obj)
+        ])
 
         if self.mode == "multiple":
             res = cross_validate(pipeline, self.x, self.y,
