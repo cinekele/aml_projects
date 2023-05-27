@@ -61,7 +61,7 @@ class Objective(object):
                                            importance_type='total_gain')
         elif classifier_name == 'SVC':
             kernel = trial.suggest_categorical('svc_kernel', ['linear', 'poly', 'rbf', 'sigmoid'])
-            c = trial.suggest_float('svc_C', 1e-4, 1e4, log=True)
+            c = trial.suggest_float('svc_C', 1e-2, 1e2, log=True)
             classifier_obj = SVC(kernel=kernel, C=c)
         elif classifier_name == "RF":
             max_depth = trial.suggest_int('rf_max_depth', 1, 15)
