@@ -2,7 +2,7 @@ from typing import Callable
 
 import numpy as np
 from lightgbm import LGBMClassifier
-from sklearn.feature_selection import SelectFromModel
+from sklearn.feature_selection import SelectFromModel, SelectFwe, SelectFpr, SelectKBest, SelectFdr
 from sklearn.metrics import balanced_accuracy_score, make_scorer
 from sklearn.model_selection import StratifiedKFold, cross_validate
 from sklearn.naive_bayes import BernoulliNB, MultinomialNB, ComplementNB
@@ -14,12 +14,18 @@ from xgboost import XGBClassifier
 
 
 def get_feature_numbers(estimator, X, y):
-    est = estimator.named_steps['model']
+    try:
+        est = estimator.named_steps['model']
+    except AttributeError:
+        est = estimator
     return est.n_features_in_
 
 
 def dataset_scorer(estimator, X, y, scaling_factor):
-    est = estimator.named_steps['model']
+    try:
+        est = estimator.named_steps['model']
+    except AttributeError:
+        est = estimator
     n_features = est.n_features_in_
     y_pred = estimator.predict(X)
     score = balanced_accuracy_score(y, y_pred)
@@ -138,7 +144,7 @@ class Objective(object):
             return np.mean(res['test_score'])
 
 
-class SpamObjective(object):
+class NaiveBayesObjective(object):
 
     # New class for spam dataset. It's needed because of BernoulliNB which works on binary data.
     def __init__(self, x, y, mode: str, single_scorer: Callable = spam_scorer,
@@ -154,6 +160,7 @@ class SpamObjective(object):
 
     def __call__(self, trial):
         classifier_name = trial.suggest_categorical('classifier', ['Bern', 'Multi', 'Complement'])
+        selector_name = trial.suggest_categorical('selector', ['FromModel', 'Fwe', 'KBest', 'Fpr', 'Fdr'])
         alpha = trial.suggest_float('nb_alpha', 1e-10, 10, log=True)
         if classifier_name == "Bern":
             classifier_obj = BernoulliNB(alpha=alpha)
@@ -161,9 +168,109 @@ class SpamObjective(object):
             classifier_obj = MultinomialNB(alpha=alpha)
         else:
             classifier_obj = ComplementNB(alpha=alpha)
-        c = trial.suggest_float('svc_C', 1e-2, 10)
+
+        if selector_name == 'FromModel':
+            c = trial.suggest_float('svc_C', 1e-2, 10)
+            selector_obj = SelectFromModel(LinearSVC(C=c))
+        elif selector_name == 'Fwe':
+            alpha = trial.suggest_float('fwe_alpha', 0.05, 0.5)
+            selector_obj = SelectFwe(alpha=alpha)
+        elif selector_name == 'KBest':
+            k = trial.suggest_int('k', 5, self.x.shape[1], log=True)  # .shape[1] works with sparse matrices
+            selector_obj = SelectKBest(k=k)
+        elif selector_name == 'Fpr':
+            alpha = trial.suggest_float('fwe_alpha', 0.05, 0.5)
+            selector_obj = SelectFpr(alpha=alpha)
+        else:
+            alpha = trial.suggest_float('fdr_alpha', 0.2, 0.5)
+            selector_obj = SelectFdr(alpha=alpha)
+
         pipeline = Pipeline([
-            ('fs', SelectFromModel(LinearSVC(C=c))),
+            ('fs', selector_obj),
+            ('model', classifier_obj)
+        ])
+
+        if self.mode == "multiple":
+            res = cross_validate(pipeline, self.x, self.y,
+                                 scoring={
+                                     'balanced_accuracy': make_scorer(balanced_accuracy_score),
+                                     'feature_numbers': get_feature_numbers
+                                 }, cv=self.cv, n_jobs=self.n_jobs)
+            return np.mean(res['test_balanced_accuracy']), np.mean(res['test_feature_numbers'])
+        else:
+            res = cross_validate(pipeline, self.x, self.y,
+                                 scoring={
+                                     "score": self.single_scorer
+                                 }, cv=self.cv, n_jobs=self.n_jobs)
+            return np.mean(res['test_score'])
+
+
+class SpamObjective(object):
+
+    # New class for spam dataset. It's needed because SVC does not work with sparse matrices
+    def __init__(self, x, y, mode: str, single_scorer: Callable = spam_scorer,
+                 cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=123), n_jobs=5):
+        self.n_jobs = n_jobs
+        self.cv = cv
+        self.x = x
+        self.y = y
+        if mode not in ["single", "multiple"]:
+            raise Exception("mode isn't single or multiple")
+        self.mode = mode
+        self.single_scorer = single_scorer
+
+    def __call__(self, trial):
+        classifier_name = trial.suggest_categorical('classifier', ['XGB', 'LGBM', 'RF', 'L1_SVC'])
+        selector_name = trial.suggest_categorical('selector', ['FromModel', 'Fwe', 'KBest', 'Fpr', 'Fdr'])
+        if classifier_name == 'XGB':
+            booster = trial.suggest_categorical('xgb_booster', ['gbtree', 'dart'])
+            max_depth = trial.suggest_int('xgb_max_depth', 1, 15)
+            n_estimators = trial.suggest_int('xgb_n_estimators', 10, 500, log=True)
+            subsample = trial.suggest_float('xgb_subsample', 0.6, 1)
+            classifier_obj = XGBClassifier(booster=booster, max_depth=max_depth,
+                                           n_estimators=n_estimators, subsample=subsample,
+                                           importance_type='total_gain')
+        elif classifier_name == "RF":
+            max_depth = trial.suggest_int('rf_max_depth', 1, 15)
+            n_estimators = trial.suggest_int('rf_n_estimators', 10, 500, log=True)
+            criterion = trial.suggest_categorical('rf_criterion', ['gini', 'entropy', 'log_loss'])
+            min_samples_split = trial.suggest_float('rf_min_samples_split', 0.01, 0.1)
+            classifier_obj = RandomForestClassifier(
+                max_depth=max_depth,
+                n_estimators=n_estimators,
+                criterion=criterion,
+                min_samples_split=min_samples_split
+            )
+        elif classifier_name == "L1_SVC":
+            c = trial.suggest_float("l1_svc_C", 1e-2, 1e2, log=True)
+            classifier_obj = LinearSVC(penalty="l1", C=c, dual=False, class_weight="balanced")
+        else:
+            boosting_type = trial.suggest_categorical('lgbm_boosting_type', ['gbdt', 'dart'])
+            max_depth = trial.suggest_int('lgbm_max_depth', 1, 15)
+            n_estimators = trial.suggest_int('lgbm_n_estimators', 10, 500, log=True)
+            subsample = trial.suggest_float('lgbm_subsample', 0.6, 1)
+            classifier_obj = LGBMClassifier(boosting_type=boosting_type, max_depth=max_depth,
+                                            n_estimators=n_estimators, subsample=subsample,
+                                            importance_type='gain')
+
+        if selector_name == 'FromModel':
+            c = trial.suggest_float('svc_C', 1e-2, 10)
+            selector_obj = SelectFromModel(LinearSVC(C=c))
+        elif selector_name == 'Fwe':
+            alpha = trial.suggest_float('fwe_alpha', 0.05, 0.5)
+            selector_obj = SelectFwe(alpha=alpha)
+        elif selector_name == 'KBest':
+            k = trial.suggest_int('k', 5, self.x.shape[1], log=True)  # .shape[1] works with sparse matrices
+            selector_obj = SelectKBest(k=k)
+        elif selector_name == 'Fpr':
+            alpha = trial.suggest_float('fwe_alpha', 0.05, 0.5)
+            selector_obj = SelectFpr(alpha=alpha)
+        else:
+            alpha = trial.suggest_float('fdr_alpha', 0.2, 0.5)
+            selector_obj = SelectFdr(alpha=alpha)
+
+        pipeline = Pipeline([
+            ('fs', selector_obj),
             ('model', classifier_obj)
         ])
 
