@@ -2,6 +2,7 @@ from typing import Callable
 
 import numpy as np
 from lightgbm import LGBMClassifier
+from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_selection import SelectFromModel, SelectFwe, SelectFpr, SelectKBest, SelectFdr
 from sklearn.metrics import balanced_accuracy_score, make_scorer
 from sklearn.model_selection import StratifiedKFold, cross_validate
@@ -162,6 +163,8 @@ class NaiveBayesObjective(object):
         classifier_name = trial.suggest_categorical('classifier', ['Bern', 'Multi', 'Complement'])
         selector_name = trial.suggest_categorical('selector', ['FromModel', 'Fwe', 'KBest', 'Fpr', 'Fdr'])
         alpha = trial.suggest_float('nb_alpha', 1e-10, 10, log=True)
+        n_features = CountVectorizer().fit_transform(self.x).shape[1]
+
         if classifier_name == "Bern":
             classifier_obj = BernoulliNB(alpha=alpha)
         elif classifier_name == 'Multi':
@@ -176,7 +179,7 @@ class NaiveBayesObjective(object):
             alpha = trial.suggest_float('fwe_alpha', 0.05, 0.5)
             selector_obj = SelectFwe(alpha=alpha)
         elif selector_name == 'KBest':
-            k = trial.suggest_int('k', 5, self.x.shape[1], log=True)  # .shape[1] works with sparse matrices
+            k = trial.suggest_int('k', 5, n_features / 2, log=True)  # .shape[1] works with sparse matrices
             selector_obj = SelectKBest(k=k)
         elif selector_name == 'Fpr':
             alpha = trial.suggest_float('fwe_alpha', 0.05, 0.5)
@@ -186,6 +189,7 @@ class NaiveBayesObjective(object):
             selector_obj = SelectFdr(alpha=alpha)
 
         pipeline = Pipeline([
+            ('vectorizer', CountVectorizer(dtype=np.float64)),
             ('fs', selector_obj),
             ('model', classifier_obj)
         ])
@@ -222,6 +226,9 @@ class SpamObjective(object):
     def __call__(self, trial):
         classifier_name = trial.suggest_categorical('classifier', ['XGB', 'LGBM', 'RF', 'L1_SVC'])
         selector_name = trial.suggest_categorical('selector', ['FromModel', 'Fwe', 'KBest', 'Fpr', 'Fdr'])
+        max_df = trial.suggest_float('max_df', 0.8, 1.0)
+        min_df = trial.suggest_float('min_df', 0.0, 0.05)
+        n_features = CountVectorizer(max_df=max_df, min_df=min_df).fit_transform(self.x).shape[1]
         if classifier_name == 'XGB':
             booster = trial.suggest_categorical('xgb_booster', ['gbtree', 'dart'])
             max_depth = trial.suggest_int('xgb_max_depth', 1, 15)
@@ -254,13 +261,12 @@ class SpamObjective(object):
                                             importance_type='gain')
 
         if selector_name == 'FromModel':
-            c = trial.suggest_float('svc_C', 1e-2, 10)
-            selector_obj = SelectFromModel(LinearSVC(C=c))
+            selector_obj = SelectFromModel(classifier_obj)
         elif selector_name == 'Fwe':
             alpha = trial.suggest_float('fwe_alpha', 0.05, 0.5)
             selector_obj = SelectFwe(alpha=alpha)
         elif selector_name == 'KBest':
-            k = trial.suggest_int('k', 5, self.x.shape[1], log=True)  # .shape[1] works with sparse matrices
+            k = trial.suggest_int('k', 5, n_features / 2, log=True)  # .shape[1] works with sparse matrices
             selector_obj = SelectKBest(k=k)
         elif selector_name == 'Fpr':
             alpha = trial.suggest_float('fwe_alpha', 0.05, 0.5)
@@ -270,6 +276,7 @@ class SpamObjective(object):
             selector_obj = SelectFdr(alpha=alpha)
 
         pipeline = Pipeline([
+            ('vectorizer', CountVectorizer(max_df=max_df, min_df=min_df, dtype=np.float64)),
             ('fs', selector_obj),
             ('model', classifier_obj)
         ])
